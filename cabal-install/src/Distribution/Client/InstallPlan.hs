@@ -520,7 +520,7 @@ fromSolverInstallPlan
 fromSolverInstallPlan f plan =
   mkInstallPlan
     "fromSolverInstallPlan"
-    (Graph.fromDistinctList pkgs'')
+    (Graph.fromDistinctList (distinctUnits pkgs''))
     (SolverInstallPlan.planIndepGoals plan)
   where
     (_, _, pkgs'') =
@@ -566,7 +566,7 @@ fromSolverInstallPlanWithProgress f plan = do
   return $
     mkInstallPlan
       "fromSolverInstallPlanWithProgress"
-      (Graph.fromDistinctList pkgs'')
+      (Graph.fromDistinctList (distinctUnits pkgs''))
       (SolverInstallPlan.planIndepGoals plan)
   where
     f' (pidMap, ipiMap, pkgs) pkg = do
@@ -583,6 +583,12 @@ fromSolverInstallPlanWithProgress f plan = do
     mapDep pidMap _ (PlannedId pid)
       | Just pkgs <- Map.lookup pid pidMap = pkgs
       | otherwise = error ("fromSolverInstallPlan: PlannedId " ++ prettyShow pid)
+
+-- | Keep one node per 'UnitId' when materializing pre-existing dependency
+-- closures into the install plan graph.
+distinctUnits :: IsUnit a => [a] -> [a]
+distinctUnits =
+  Map.elems . Map.fromList . map (\pkg -> (nodeKey pkg, pkg))
 
 -- This shouldn't happen, since mapDep should only be called
 -- on neighbor SolverId, which must have all been done already
