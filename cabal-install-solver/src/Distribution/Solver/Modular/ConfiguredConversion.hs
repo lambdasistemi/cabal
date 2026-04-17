@@ -60,7 +60,7 @@ installedDepsClosure :: SI.InstalledPackageIndex -> UnitId -> [IPI.InstalledPack
 installedDepsClosure iidx rootUnitId =
   case SI.lookupUnitId iidx rootUnitId of
     Nothing -> []
-    Just rootIpi -> go Set.empty (IPI.depends rootIpi)
+    Just rootIpi -> go (Set.singleton rootUnitId) (IPI.depends rootIpi)
       where
         go _ [] = []
         go seen (depUnitId : depUnitIds)

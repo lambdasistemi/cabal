@@ -1689,8 +1689,8 @@ elaborateInstallPlan
       solverPreExistingUnitIds =
         Set.fromList
           [ IPI.installedUnitId (instSolverPkgIPI inst)
-          | SolverInstallPlan.PreExisting inst
-              <- SolverInstallPlan.toList solverPlan
+          | SolverInstallPlan.PreExisting inst <-
+              SolverInstallPlan.toList solverPlan
           ]
 
       elaboratedInstallPlan
@@ -1721,11 +1721,11 @@ elaborateInstallPlan
         :: InstSolverPackage
         -> [IPI.InstalledPackageInfo]
       preExistingUnitClosure pkg =
-        rootIpi :
-          [ depIpi
-          | depIpi <- instSolverPkgClosureDeps pkg
-          , IPI.installedUnitId depIpi `Set.notMember` solverPreExistingUnitIds
-          ]
+        rootIpi
+          : [ depIpi
+            | depIpi <- instSolverPkgClosureDeps pkg
+            , IPI.installedUnitId depIpi `Set.notMember` solverPreExistingUnitIds
+            ]
         where
           rootIpi = instSolverPkgIPI pkg
 

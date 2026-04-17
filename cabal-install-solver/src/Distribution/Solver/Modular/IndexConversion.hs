@@ -167,7 +167,10 @@ convIP idx ipi =
 -- May return Nothing if the package can't be found in the index. That
 -- indicates that the original package having this dependency is broken
 -- and should be ignored. Same-package installed edges are omitted here and
--- reintroduced later from the installed dependency closure.
+-- reintroduced later from the installed dependency closure. We compare
+-- 'packageId's here because for installed packages that is the source package
+-- identity, which is exactly the boundary between intra-package and
+-- inter-package edges.
 convIPId
   :: DependencyReason PN
   -> Component

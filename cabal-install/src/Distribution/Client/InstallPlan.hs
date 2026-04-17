@@ -588,7 +588,7 @@ fromSolverInstallPlanWithProgress f plan = do
 -- closures into the install plan graph.
 distinctUnits :: IsUnit a => [a] -> [a]
 distinctUnits =
-  Map.elems . Map.fromList . map (\pkg -> (nodeKey pkg, pkg))
+  Map.elems . Map.fromListWith (\_ old -> old) . map (\pkg -> (nodeKey pkg, pkg))
 
 -- This shouldn't happen, since mapDep should only be called
 -- on neighbor SolverId, which must have all been done already
@@ -599,13 +599,16 @@ distinctUnits =
 configureInstallPlan :: Cabal.ConfigFlags -> SolverInstallPlan -> InstallPlan
 configureInstallPlan configFlags solverPlan =
   flip fromSolverInstallPlan solverPlan $ \mapDep planpkg ->
-    [ case planpkg of
-        SolverInstallPlan.PreExisting pkg ->
-          PreExisting (instSolverPkgIPI pkg)
-        SolverInstallPlan.Configured pkg ->
-          Configured (configureSolverPackage mapDep pkg)
-    ]
+    case planpkg of
+      SolverInstallPlan.PreExisting pkg ->
+        preExistingClosure pkg
+      SolverInstallPlan.Configured pkg ->
+        [Configured (configureSolverPackage mapDep pkg)]
   where
+    preExistingClosure :: InstSolverPackage -> [PlanPackage]
+    preExistingClosure pkg =
+      map PreExisting (instSolverPkgIPI pkg : instSolverPkgClosureDeps pkg)
+
     configureSolverPackage
       :: (SolverId -> [PlanPackage])
       -> SolverPackage UnresolvedPkgLoc
