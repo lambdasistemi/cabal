@@ -520,7 +520,7 @@ fromSolverInstallPlan
 fromSolverInstallPlan f plan =
   mkInstallPlan
     "fromSolverInstallPlan"
-    (Graph.fromDistinctList pkgs'')
+    (Graph.fromDistinctList (distinctUnits pkgs''))
     (SolverInstallPlan.planIndepGoals plan)
   where
     (_, _, pkgs'') =
@@ -566,7 +566,7 @@ fromSolverInstallPlanWithProgress f plan = do
   return $
     mkInstallPlan
       "fromSolverInstallPlanWithProgress"
-      (Graph.fromDistinctList pkgs'')
+      (Graph.fromDistinctList (distinctUnits pkgs''))
       (SolverInstallPlan.planIndepGoals plan)
   where
     f' (pidMap, ipiMap, pkgs) pkg = do
@@ -584,6 +584,12 @@ fromSolverInstallPlanWithProgress f plan = do
       | Just pkgs <- Map.lookup pid pidMap = pkgs
       | otherwise = error ("fromSolverInstallPlan: PlannedId " ++ prettyShow pid)
 
+-- | Keep one node per 'UnitId' when materializing pre-existing dependency
+-- closures into the install plan graph.
+distinctUnits :: IsUnit a => [a] -> [a]
+distinctUnits =
+  Map.elems . Map.fromListWith (\_ old -> old) . map (\pkg -> (nodeKey pkg, pkg))
+
 -- This shouldn't happen, since mapDep should only be called
 -- on neighbor SolverId, which must have all been done already
 -- by the reverse top-sort (we assume the graph is not broken).
@@ -593,13 +599,16 @@ fromSolverInstallPlanWithProgress f plan = do
 configureInstallPlan :: Cabal.ConfigFlags -> SolverInstallPlan -> InstallPlan
 configureInstallPlan configFlags solverPlan =
   flip fromSolverInstallPlan solverPlan $ \mapDep planpkg ->
-    [ case planpkg of
-        SolverInstallPlan.PreExisting pkg ->
-          PreExisting (instSolverPkgIPI pkg)
-        SolverInstallPlan.Configured pkg ->
-          Configured (configureSolverPackage mapDep pkg)
-    ]
+    case planpkg of
+      SolverInstallPlan.PreExisting pkg ->
+        preExistingClosure pkg
+      SolverInstallPlan.Configured pkg ->
+        [Configured (configureSolverPackage mapDep pkg)]
   where
+    preExistingClosure :: InstSolverPackage -> [PlanPackage]
+    preExistingClosure pkg =
+      map PreExisting (instSolverPkgIPI pkg : instSolverPkgClosureDeps pkg)
+
     configureSolverPackage
       :: (SolverId -> [PlanPackage])
       -> SolverPackage UnresolvedPkgLoc

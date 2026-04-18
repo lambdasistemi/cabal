@@ -1685,13 +1685,23 @@ elaborateInstallPlan
                   )
           f _ = Nothing
 
+      solverPreExistingUnitIds :: Set UnitId
+      solverPreExistingUnitIds =
+        Set.fromList
+          [ IPI.installedUnitId (instSolverPkgIPI inst)
+          | SolverInstallPlan.PreExisting inst <-
+              SolverInstallPlan.toList solverPlan
+          ]
+
       elaboratedInstallPlan
         :: LogProgress (InstallPlan.GenericInstallPlan IPI.InstalledPackageInfo ElaboratedConfiguredPackage)
       elaboratedInstallPlan =
         flip InstallPlan.fromSolverInstallPlanWithProgress solverPlan $ \mapDep planpkg ->
           case planpkg of
             SolverInstallPlan.PreExisting pkg ->
-              return [InstallPlan.PreExisting (instSolverPkgIPI pkg)]
+              return $
+                map InstallPlan.PreExisting $
+                  preExistingUnitClosure pkg
             SolverInstallPlan.Configured pkg ->
               let inplace_doc
                     | shouldBuildInplaceOnly pkg = text "inplace"
@@ -1703,6 +1713,21 @@ elaborateInstallPlan
                         <+> quotes (pretty (packageId pkg))
                     )
                     $ map InstallPlan.Configured <$> elaborateSolverToComponents mapDep pkg
+
+      -- A selected installed unit may depend on installed units that are not
+      -- represented as separate solver nodes. Materialize that installed
+      -- dependency closure here so the final install plan stays closed.
+      preExistingUnitClosure
+        :: InstSolverPackage
+        -> [IPI.InstalledPackageInfo]
+      preExistingUnitClosure pkg =
+        rootIpi
+          : [ depIpi
+            | depIpi <- instSolverPkgClosureDeps pkg
+            , IPI.installedUnitId depIpi `Set.notMember` solverPreExistingUnitIds
+            ]
+        where
+          rootIpi = instSolverPkgIPI pkg
 
       -- NB: We don't INSTANTIATE packages at this point.  That's
       -- a post-pass.  This makes it simpler to compute dependencies.

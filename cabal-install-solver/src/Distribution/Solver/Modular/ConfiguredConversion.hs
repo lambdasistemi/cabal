@@ -5,8 +5,10 @@ module Distribution.Solver.Modular.ConfiguredConversion
 import Data.Maybe
 import Prelude hiding (pi)
 import Data.Either (partitionEithers)
+import qualified Data.Set as Set
 
 import Distribution.Package (UnitId, packageId)
+import qualified Distribution.InstalledPackageInfo as IPI
 
 import qualified Distribution.Simple.PackageIndex as SI
 
@@ -33,6 +35,7 @@ convCP iidx sidx (CP qpi fa es ds) =
     Left  pi -> PreExisting $
                   InstSolverPackage {
                     instSolverPkgIPI = fromJust $ SI.lookupUnitId iidx pi,
+                    instSolverPkgClosureDeps = installedDepsClosure iidx pi,
                     instSolverPkgLibDeps = fmap fst ds',
                     instSolverPkgExeDeps = fmap snd ds'
                   }
@@ -49,6 +52,24 @@ convCP iidx sidx (CP qpi fa es ds) =
   where
     ds' :: ComponentDeps ([SolverId] {- lib -}, [SolverId] {- exe -})
     ds' = fmap (partitionEithers . map convConfId) ds
+
+-- | Collect the transitive installed-unit closure of a selected pre-existing
+-- unit so the final install plan remains closed even when some of those units
+-- never appear as solver nodes.
+installedDepsClosure :: SI.InstalledPackageIndex -> UnitId -> [IPI.InstalledPackageInfo]
+installedDepsClosure iidx rootUnitId =
+  case SI.lookupUnitId iidx rootUnitId of
+    Nothing -> []
+    Just rootIpi -> go (Set.singleton rootUnitId) (IPI.depends rootIpi)
+      where
+        go _ [] = []
+        go seen (depUnitId : depUnitIds)
+          | depUnitId `Set.member` seen = go seen depUnitIds
+          | otherwise =
+              case SI.lookupUnitId iidx depUnitId of
+                Just depIpi ->
+                  depIpi : go (Set.insert depUnitId seen) (IPI.depends depIpi ++ depUnitIds)
+                _ -> go seen depUnitIds
 
 convPI :: PI QPN -> Either UnitId PackageId
 convPI (PI _ (I _ (Inst pi))) = Left pi

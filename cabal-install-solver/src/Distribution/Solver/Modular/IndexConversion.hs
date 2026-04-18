@@ -84,21 +84,44 @@ convIPI' (ShadowPkgs sip) idx =
 
 -- | Extract/recover the package ID from an installed package info, and convert it to a solver's I.
 convId :: IPI.InstalledPackageInfo -> (PN, I)
-convId ipi = (pn, I ver $ Inst $ IPI.installedUnitId ipi)
-  where MungedPackageId mpn ver = mungedId ipi
-        -- HACK. See Note [Index conversion with internal libraries]
-        pn = encodeCompatPackageName mpn
+convId ipi = (installedPackageName ipi, I ver $ Inst $ IPI.installedUnitId ipi)
+  where
+    MungedPackageId _ ver = mungedId ipi
+
+-- | Keep public sublibraries addressable by their source package name,
+-- so a solver request for @pkg:sublib@ can match an installed unit.
+-- The non-sublibrary branch preserves the legacy munged-name HACK;
+-- see Note [Index conversion with internal libraries].
+installedPackageName :: IPI.InstalledPackageInfo -> PN
+installedPackageName ipi
+  | isPublicSubLibrary ipi = packageName ipi
+  | otherwise =
+      let MungedPackageId mpn _ = mungedId ipi
+       in encodeCompatPackageName mpn
+
+-- | Recover the component that an installed unit exposes to the solver.
+installedExposedComponent :: IPI.InstalledPackageInfo -> ExposedComponent
+installedExposedComponent ipi
+  | isPublicSubLibrary ipi = ExposedLib (IPI.sourceLibName ipi)
+  | otherwise = ExposedLib LMainLibName
+
+-- | Detect public sublibraries that should be modeled as components of the
+-- source package rather than as munged standalone packages.
+isPublicSubLibrary :: IPI.InstalledPackageInfo -> Bool
+isPublicSubLibrary ipi =
+  IPI.libVisibility ipi == LibraryVisibilityPublic
+    && IPI.sourceLibName ipi /= LMainLibName
 
 -- | Convert a single installed package into the solver-specific format.
 convIP :: SI.InstalledPackageIndex -> IPI.InstalledPackageInfo -> (PN, I, PInfo)
 convIP idx ipi =
-  case traverse (convIPId (DependencyReason pn M.empty S.empty) comp idx) (IPI.depends ipi) of
-        Left u    -> (pn, i, PInfo [] M.empty M.empty (Just (Broken u)))
-        Right fds -> (pn, i, PInfo fds components M.empty Nothing)
+  case fmap catMaybes $
+       traverse (convIPId (DependencyReason pn M.empty S.empty) comp ipi idx) (IPI.depends ipi) of
+    Left u -> (pn, i, PInfo [] M.empty M.empty (Just (Broken u)))
+    Right fds -> (pn, i, PInfo fds components M.empty Nothing)
  where
-  -- TODO: Handle sub-libraries and visibility.
   components =
-      M.singleton (ExposedLib LMainLibName)
+      M.singleton (installedExposedComponent ipi)
                   ComponentInfo {
                       compIsVisible = IsVisible True
                     , compIsBuildable = IsBuildable True
@@ -143,14 +166,28 @@ convIP idx ipi =
 --
 -- May return Nothing if the package can't be found in the index. That
 -- indicates that the original package having this dependency is broken
--- and should be ignored.
-convIPId :: DependencyReason PN -> Component -> SI.InstalledPackageIndex -> UnitId -> Either UnitId (FlaggedDep PN)
-convIPId dr comp idx ipid =
+-- and should be ignored. Same-package installed edges are omitted here and
+-- reintroduced later from the installed dependency closure. We compare
+-- 'packageId's here because for installed packages that is the source package
+-- identity, which is exactly the boundary between intra-package and
+-- inter-package edges.
+convIPId
+  :: DependencyReason PN
+  -> Component
+  -> IPI.InstalledPackageInfo
+  -> SI.InstalledPackageIndex
+  -> UnitId
+  -> Either UnitId (Maybe (FlaggedDep PN))
+convIPId dr comp current idx ipid =
   case SI.lookupUnitId idx ipid of
     Nothing  -> Left ipid
-    Just ipi -> let (pn, i) = convId ipi
-                    name = ExposedLib LMainLibName  -- TODO: Handle sub-libraries.
-                in  Right (D.Simple (LDep dr (Dep (PkgComponent pn name) (Fixed i))) comp)
+    Just ipi
+      | packageId current == packageId ipi
+      -> Right Nothing
+      | otherwise
+      -> let (pn, i) = convId ipi
+             name = installedExposedComponent ipi
+         in Right (Just (D.Simple (LDep dr (Dep (PkgComponent pn name) (Fixed i))) comp))
                 -- NB: something we pick up from the
                 -- InstalledPackageIndex is NEVER an executable
 
